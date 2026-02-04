@@ -1,0 +1,67 @@
+# Node
+node_modules/
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Debug
+coverage/
+
+# Runtime files
+pids
+*.pid
+*.seed
+
+# Build outputs
+dist/
+build/
+
+# Environment files (DO NOT COMMIT)
+.env
+.env.local
+.env.*.local
+
+# Editor directories
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Database dumps and local DB files
+*.sql
+*.dump
+*.psql
+*.pgdump
+*.sqlite
+*.sqlite3
+*.db
+dump/
+backups/
+pgdata/
+
+# Personal or sensitive files
+*.key
+*.pem
+*.crt
+
+# Optional: ignore local DB config if you keep credentials in source (better: move to .env)
+# src/db.js
+
+# Others
+.sass-cache
+.cache
+
+# npm artifacts
+package-lock.json
+
+# Ignore environment-specific files from hosting providers
+.env.production
+.env.staging
+
+# Note: keep an editable .env.example (no secrets) in the repo
