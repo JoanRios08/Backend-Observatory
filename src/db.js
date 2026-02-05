@@ -16,7 +16,7 @@ const poolConfig = connectionString
       ssl,
       max: Number(process.env.DB_MAX_CLIENTS) || 10,
       idleTimeoutMillis: Number(process.env.DB_IDLE_TIMEOUT_MS) || 30000,
-      connectionTimeoutMillis: Number(process.env.DB_CONN_TIMEOUT_MS) || 2000
+      connectionTimeoutMillis: Number(process.env.DB_CONN_TIMEOUT_MS) || 15000
     }
   : {
       user: process.env.DB_USER || "postgres",

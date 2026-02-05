@@ -48,7 +48,17 @@ export const login = async (req, res) => {
     const payload = { id: user.id, email: user.email }
     const token = jwt.sign(payload, process.env.JWT_SECRET || 'change_this_secret', { expiresIn: '1h' })
 
-    return res.status(200).json({ ok: true, token, user: { id: user.id, email: user.email } })
+    // Intenta obtener información del rol (id y nombre)
+    let role = null
+    try {
+      role = await usersModel.getRoleById(user.role_id)
+    } catch (e) {
+      console.error('Error fetching role for user', user.id, e)
+    }
+
+    const responseUser = { id: user.id, email: user.email, role_id: user.role_id ?? null, role_name: role ? role.name : null }
+
+    return res.status(200).json({ ok: true, token, user: responseUser })
   } catch (error) {
     console.error(error)
     return res.status(500).json({ ok: false, error: 'Error al autenticar usuario' })
