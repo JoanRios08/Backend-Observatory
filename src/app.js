@@ -5,6 +5,7 @@ import postsRoutes from './routes/posts.routes.js';
 import documentsRoutes from './routes/documents.routes.js';
 import projectsRoutes from './routes/projects.routes.js';
 import authorsRoutes from './routes/authors.routes.js';
+import dashboardRoutes from './routes/dashboard.routes.js';
 
 const app = express();
 
@@ -23,5 +24,6 @@ app.use(postsRoutes);
 app.use(documentsRoutes);
 app.use(projectsRoutes);
 app.use(authorsRoutes);
+app.use(dashboardRoutes);
 
 export default app;
