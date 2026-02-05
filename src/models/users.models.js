@@ -71,14 +71,62 @@ export const authenticate = async (email, password) => {
   return null
 }
 
-export const updateUser = async (id, body) => {
-  const keys = Object.keys(body)
-  if (keys.length === 0) return null
+export const getRoleById = async (roleId) => {
+  if (!roleId) return null
+  const candidates = [
+    'public."Role"', 'public.roles', 'public."roles"', 'public.role',
+    '"Role"', 'roles', '"roles"', 'role', '"role"'
+  ]
 
-  const setClause = keys.map((k, i) => `"${k}" = $${i + 1}`).join(', ')
-  const values = keys.map(k => body[k])
+  for (const tbl of candidates) {
+    try {
+      const r = await pool.query(`SELECT id, name FROM ${tbl} WHERE id = $1 LIMIT 1`, [roleId])
+      if (r.rows && r.rows.length) return r.rows[0]
+    } catch (e) {
+      // Table/column not found - try next candidate
+      if (e && (e.code === '42P01' || e.code === '42703')) continue
+      throw e
+    }
+  }
+
+  return null
+}
+
+export const updateUser = async (id, body) => {
+  const existing = await getUserById(id)
+  if (!existing) return null
+
+  const keys = Object.keys(body).filter(k => k !== 'id' && body[k] !== undefined)
+  if (keys.length === 0) return existing
+
+  const changed = []
+  const values = []
+
+  for (const k of keys) {
+    if (k === 'password') {
+      // If a password is provided, always hash and update it
+      const hashed = await bcrypt.hash(body.password, 10)
+      changed.push(k)
+      values.push(hashed)
+      continue
+    }
+
+    const oldVal = existing[k]
+    const newVal = body[k]
+    const oldStr = oldVal === null || oldVal === undefined ? '' : String(oldVal)
+    const newStr = newVal === null || newVal === undefined ? '' : String(newVal)
+    if (oldStr !== newStr) {
+      changed.push(k)
+      values.push(newVal)
+    }
+  }
+
+  if (changed.length === 0) return existing
+
+  const setClause = changed.map((k, i) => `"${k}" = $${i + 1}`).join(', ')
+  // Always update the updated_at timestamp in the DB side
+  const query = `UPDATE "User" SET ${setClause}, "updated_at" = NOW() WHERE id = $${values.length + 1} RETURNING *`
   values.push(id)
-  const query = `UPDATE "User" SET ${setClause} WHERE id = $${values.length} RETURNING *`
   const result = await pool.query(query, values)
   return result.rows[0] || null
 }
