@@ -2,7 +2,8 @@ import { pool } from '../db.js'
 import bcrypt from 'bcryptjs'
 
 export const getAllUsers = async () => {
-  const result = await pool.query('SELECT * FROM public."User"')
+  // Solo traer los que NO están borrados (asumiendo booleano)
+  const result = await pool.query('SELECT * FROM public."User" WHERE "status" IS NOT FALSE')
   return result.rows
 }
 
@@ -12,9 +13,11 @@ export const getUserById = async (id) => {
     const statusType = (col.rows[0] && col.rows[0].data_type) || null
 
     if (statusType && statusType.includes('boolean')) {
-      const r = await pool.query('SELECT * FROM public."User" WHERE "id" = $1 AND "status" IS NOT TRUE', [id])
+      // CAMBIO: Antes decía IS NOT TRUE (buscaba borrados), ahora busca activos (IS NOT FALSE)
+      const r = await pool.query('SELECT * FROM public."User" WHERE "id" = $1 AND "status" IS NOT FALSE', [id])
       return r.rows[0] || null
     } else if (statusType) {
+      // Mantiene la lógica para strings: que no sea 'deleted'
       const r = await pool.query('SELECT * FROM public."User" WHERE "id" = $1 AND COALESCE("status", \'\') <> $2', [id, 'deleted'])
       return r.rows[0] || null
     } else {
@@ -133,18 +136,23 @@ export const updateUser = async (id, body) => {
 
 export const deleteUser = async (id) => {
   try {
+    // Verificamos el tipo de dato de la columna status
     const col = await pool.query("SELECT data_type FROM information_schema.columns WHERE table_schema='public' AND table_name='User' AND column_name='status'")
     const statusType = (col.rows[0] && col.rows[0].data_type) || null
+    
     let result
     if (statusType && statusType.includes('boolean')) {
-      result = await pool.query('UPDATE public."User" SET "status" = $1 WHERE "id" = $2 RETURNING *', [true, id])
+      // CAMBIO: Ahora ponemos status = false para el borrado lógico
+      result = await pool.query('UPDATE public."User" SET "status" = $1 WHERE "id" = $2 RETURNING *', [false, id])
     } else if (statusType) {
       result = await pool.query('UPDATE public."User" SET "status" = $1 WHERE "id" = $2 RETURNING *', ['deleted', id])
     } else {
+      // Si no existe la columna status, se hace un borrado físico (o podrías lanzar un error)
       result = await pool.query('DELETE FROM public."User" WHERE "id" = $1 RETURNING *', [id])
     }
     return result.rows[0] || null
   } catch (error) {
+    // Si falla por columna inexistente (error 42703), borramos físicamente
     if (error && error.code === '42703') {
       const result = await pool.query('DELETE FROM "User" WHERE id = $1 RETURNING *', [id])
       return result.rows[0] || null
