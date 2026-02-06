@@ -16,6 +16,24 @@ export const createDocument = async (req, res) => {
   }
 }
 
+// En src/controllers/documents.controllers.js
+export const updateDocument = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const document = await documentsModel.updateDocument(id, req.body);
+    
+    if (!document) {
+      return res.status(404).json({ ok: false, error: 'Documento no encontrado' });
+    }
+
+    return res.status(200).json({ ok: true, document });
+  } catch (error) {
+    // Cambia el console.error para ver QUÉ falló exactamente (ej: nombre de columna mal escrita)
+    console.error("DETALLE DEL ERROR:", error.message); 
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+}
+
 export const getDocuments = async (req, res) => {
   try {
     const documents = await documentsModel.getAllDocuments()
