@@ -1,18 +1,26 @@
 import * as projectsModel from '../models/projects.models.js'
 
 export const createProject = async (req, res) => {
-  const body = req.body || {}
-  const { name, description, start_date, end_date, status, author_id } = body
-  if (!name || !author_id) {
-    return res.status(400).json({ ok: false, error: 'Faltan campos requeridos' })
-  }
-
   try {
-    const project = await projectsModel.createProject({ name, description, start_date, end_date, status, author_id })
-    return res.status(201).json({ ok: true, project })
+    const { name, description, start_date, end_date, status, author_id } = req.body;
+
+    const newProject = await projectsModel.createProject({
+      name,
+      description,
+      start_date,
+      end_date,
+      // Si status viene en el body lo usa, si no, pone 'active'
+      status: status || 'active', 
+      author_id
+    });
+
+    return res.status(201).json({
+      ok: true,
+      project: newProject
+    });
   } catch (error) {
-    console.error(error)
-    return res.status(500).json({ ok: false, error: 'Error al crear el proyecto' })
+    console.error("Error en Create Project:", error.message);
+    return res.status(500).json({ ok: false, error: error.message });
   }
 }
 

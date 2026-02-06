@@ -7,6 +7,6 @@ export const projectCreateSchema = z.object({
   end_date: z.string().optional(),
   status: z.enum(['active', 'completed', 'suspended']).optional(),
   author_id: z.number(),
-})
+}).passthrough() // <--- Esto permite recibir author_name
 
 export const projectUpdateSchema = projectCreateSchema.partial()
