@@ -22,18 +22,31 @@ export const createPost = async (req, res) => {
 // --- ESTA ES LA FUNCIÓN QUE FALTABA ---
 export const updatePost = async (req, res) => {
   const { id } = req.params
-  const { title, content, category_id } = req.body
+  const dataToUpdate = req.body
+
+  // Verificamos que el body no esté vacío
+  if (!dataToUpdate || Object.keys(dataToUpdate).length === 0) {
+    return res.status(400).json({ 
+      ok: false, 
+      error: 'Debe enviar al menos un campo para actualizar' 
+    })
+  }
 
   try {
-    const post = await postsModel.updatePost(id, { title, content, category_id })
+    // Enviamos el ID y el objeto completo al modelo dinámico
+    const post = await postsModel.updatePost(id, dataToUpdate)
     
     if (!post) {
-      return res.status(404).json({ ok: false, error: 'Post no encontrado para editar' })
+      return res.status(404).json({ ok: false, error: 'Post no encontrado' })
     }
 
-    return res.status(200).json({ ok: true, message: 'Post actualizado con éxito', post })
+    return res.status(200).json({ 
+      ok: true, 
+      message: 'Post actualizado con éxito', 
+      post 
+    })
   } catch (error) {
-    console.error(error)
+    console.error("Error en updatePost:", error)
     return res.status(500).json({ ok: false, error: 'Error al actualizar el post' })
   }
 }
