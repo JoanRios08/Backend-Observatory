@@ -25,23 +25,36 @@ export const createPost = async ({ title, content, user_id, category_id, author_
 }
 
 // 2. EDITAR POST (Lógica añadida): Actualiza contenido y fecha automáticamente
-export const updatePost = async (id, { title, content, category_id }) => {
-  const now = new Date(); // Capturamos el momento exacto de la edición
+export const updatePost = async (id, body) => {
+  const now = new Date();
+  
+  // 1. Filtramos las llaves que vienen en el body y que no sean undefined
+  const fields = Object.keys(body).filter(key => body[key] !== undefined);
+  
+  if (fields.length === 0) return null;
 
+  // 2. Construimos la cláusula SET dinámicamente: "title"=$1, "content"=$2...
+  const setClause = fields
+    .map((field, index) => `"${field}" = $${index + 1}`)
+    .join(', ');
+
+  // 3. La query incluye la actualización automática de "updated_at"
   const query = `
     UPDATE public."Post"
-    SET 
-      "title" = $1, 
-      "content" = $2, 
-      "category_id" = $3, 
-      "updated_at" = $4
-    WHERE id = $5
+    SET ${setClause}, "updated_at" = $${fields.length + 1}
+    WHERE id = $${fields.length + 2}
     RETURNING *`;
 
-  const values = [title, content, category_id, now, id];
-  const result = await pool.query(query, values);
-  
-  return result.rows[0] || null;
+  // 4. Mapeamos los valores en el orden correcto
+  const values = [...fields.map(f => body[f]), now, id];
+
+  try {
+    const result = await pool.query(query, values);
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error("Error en DB al actualizar Post:", error.message);
+    throw error;
+  }
 }
 
 export const getAllPosts = async () => {
