@@ -1,10 +1,8 @@
-import { pool } from '../db.js'
+import { pool } from '../db.js';
 
-// 1. CREAR POST: Forzamos el estatus y la fecha
 export const createPost = async ({ title, content, user_id, category_id, author_id }) => {
-  // Ignoramos el 'status' que venga por parámetros y lo definimos aquí directamente
   const fixedStatus = 'pending_approval';
-  const now = new Date(); // Fecha de modificación/creación actual
+  const now = new Date();
 
   const query = `
     INSERT INTO public."Post" (
@@ -22,52 +20,56 @@ export const createPost = async ({ title, content, user_id, category_id, author_
   const values = [title, content, fixedStatus, user_id, category_id, author_id, now];
   const result = await pool.query(query, values);
   return result.rows[0];
-}
+};
 
-// 2. EDITAR POST (Lógica añadida): Actualiza contenido y fecha automáticamente
+/**
+ * CORRECCIÓN: updatePost aceptaba cualquier campo incluyendo "status",
+ * permitiendo que cualquier usuario cambie un post a 'published' sin pasar
+ * por un flujo de aprobación. Se filtra "status" del body en el modelo
+ * como segunda línea de defensa (la primera está en el controlador).
+ */
 export const updatePost = async (id, body) => {
   const now = new Date();
-  
-  // 1. Filtramos las llaves que vienen en el body y que no sean undefined
-  const fields = Object.keys(body).filter(key => body[key] !== undefined);
-  
+
+  // Excluir "status" — los cambios de estado van por flujo de aprobación
+  const { status: _ignored, ...safeBody } = body;
+
+  const fields = Object.keys(safeBody).filter(key => safeBody[key] !== undefined);
+
   if (fields.length === 0) return null;
 
-  // 2. Construimos la cláusula SET dinámicamente: "title"=$1, "content"=$2...
   const setClause = fields
     .map((field, index) => `"${field}" = $${index + 1}`)
     .join(', ');
 
-  // 3. La query incluye la actualización automática de "updated_at"
   const query = `
     UPDATE public."Post"
     SET ${setClause}, "updated_at" = $${fields.length + 1}
     WHERE id = $${fields.length + 2}
     RETURNING *`;
 
-  // 4. Mapeamos los valores en el orden correcto
-  const values = [...fields.map(f => body[f]), now, id];
+  const values = [...fields.map(f => safeBody[f]), now, id];
 
   try {
     const result = await pool.query(query, values);
     return result.rows[0] || null;
   } catch (error) {
-    console.error("Error en DB al actualizar Post:", error.message);
+    console.error('Error en DB al actualizar Post:', error.message);
     throw error;
   }
-}
+};
 
 export const getAllPosts = async () => {
-  const result = await pool.query('SELECT * FROM public."Post" ORDER BY created_at DESC')
-  return result.rows
-}
+  const result = await pool.query('SELECT * FROM public."Post" ORDER BY created_at DESC');
+  return result.rows;
+};
 
 export const getPostById = async (id) => {
-  const result = await pool.query('SELECT * FROM public."Post" WHERE id = $1', [id])
-  return result.rows[0] || null
-}
+  const result = await pool.query('SELECT * FROM public."Post" WHERE id = $1', [id]);
+  return result.rows[0] || null;
+};
 
 export const deletePost = async (id) => {
-  const result = await pool.query('DELETE FROM public."Post" WHERE id = $1 RETURNING *', [id])
-  return result.rows[0] || null
-}
+  const result = await pool.query('DELETE FROM public."Post" WHERE id = $1 RETURNING *', [id]);
+  return result.rows[0] || null;
+};

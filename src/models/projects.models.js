@@ -2,13 +2,10 @@ import { pool } from '../db.js'
 
 /**
  * 1. CREAR PROYECTO
- * Forzamos el estado por defecto y la fecha de actualización.
  */
-// src/models/projects.models.js
-
 export const createProject = async ({ name, description, start_date, end_date, status, author_id }) => {
   const now = new Date();
-  
+
   const query = `
     INSERT INTO public."Project" (
       "name", 
@@ -23,12 +20,12 @@ export const createProject = async ({ name, description, start_date, end_date, s
     RETURNING *`;
 
   const values = [
-    name, 
-    description || null, 
-    start_date || null, 
-    end_date || null, 
-    status, 
-    author_id, 
+    name,
+    description || null,
+    start_date || null,
+    end_date || null,
+    status,
+    author_id,
     now
   ];
 
@@ -38,7 +35,6 @@ export const createProject = async ({ name, description, start_date, end_date, s
 
 /**
  * 2. OBTENER TODOS
- * Nota: Asegúrate de si la tabla es "Author" o "User" según tu DB.
  */
 export const getAllProjects = async () => {
   const query = `
@@ -66,16 +62,23 @@ export const getProjectById = async (id) => {
 }
 
 /**
- * 4. ACTUALIZAR PROYECTO (Dinámico + updated_at)
- * Esta versión inyecta automáticamente la fecha de modificación.
+ * 4. ACTUALIZAR PROYECTO
  */
 export const updateProject = async (id, body) => {
-  const now = new Date();
-  const keys = Object.keys(body).filter(k => body[k] !== undefined);
-  
-  if (keys.length === 0) return null;
+  // CORRECCIÓN #14: Al igual que en authors, se agrega verificación de
+  // existencia previa y whitelist de campos para evitar que el cliente
+  // actualice columnas arbitrarias (ej: id, created_at).
+  const existing = await getProjectById(id)
+  if (!existing) return null
 
-  // Construimos la cláusula SET incluyendo siempre updated_at
+  const ALLOWED_FIELDS = ['name', 'description', 'start_date', 'end_date', 'status', 'author_id']
+  const keys = Object.keys(body).filter(k =>
+    ALLOWED_FIELDS.includes(k) && body[k] !== undefined
+  )
+
+  if (keys.length === 0) return existing
+
+  const now = new Date();
   const setClause = keys.map((k, i) => `"${k}" = $${i + 1}`).join(', ');
   const query = `
     UPDATE public."Project" 
@@ -84,7 +87,7 @@ export const updateProject = async (id, body) => {
     RETURNING *`;
 
   const values = [...keys.map(k => body[k]), now, id];
-  
+
   const result = await pool.query(query, values);
   return result.rows[0] || null;
 }
