@@ -1,7 +1,7 @@
 import { pool } from '../db.js'
 
 export const createAuthor = async ({ name, bio, email }) => {
-  const query = `INSERT INTO public."Author" ("name","bio","email") VALUES ($1,$2,$3) RETURNING *`;
+  const query = `INSERT INTO public."Author" ("name","bio","email") VALUES ($1,$2,$3) RETURNING *`
   const values = [name, bio || null, email || null]
   const result = await pool.query(query, values)
   return result.rows[0]
@@ -18,8 +18,14 @@ export const getAuthorById = async (id) => {
 }
 
 export const updateAuthor = async (id, body) => {
-  const keys = Object.keys(body)
-  if (keys.length === 0) return null
+  const existing = await getAuthorById(id)
+  if (!existing) return null
+
+  const ALLOWED_FIELDS = ['name', 'bio', 'email']
+  const keys = Object.keys(body).filter(k =>
+    ALLOWED_FIELDS.includes(k) && body[k] !== undefined
+  )
+  if (keys.length === 0) return existing
 
   const setClause = keys.map((k, i) => `"${k}" = $${i + 1}`).join(', ')
   const values = keys.map(k => body[k])
