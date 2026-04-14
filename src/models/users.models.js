@@ -60,17 +60,54 @@ export const getUserById = async (id) => {
   }
 }
 
+const USER_WRITABLE_COLUMNS = new Set(['name', 'email', 'password', 'role_id', 'status'])
+
+const normalizeRoleId = async (body) => {
+  if (body.role_id !== undefined && body.role_id !== null && body.role_id !== '') {
+    return Number(body.role_id)
+  }
+
+  if (body.role === undefined || body.role === null || body.role === '') {
+    return undefined
+  }
+
+  const asNumber = Number(body.role)
+  if (!Number.isNaN(asNumber)) return asNumber
+
+  const role = await getRoleByName(String(body.role))
+  return role ? role.id : undefined
+}
+
+const sanitizeUserPayload = async (body = {}) => {
+  const payload = {}
+
+  for (const [key, value] of Object.entries(body)) {
+    if (!USER_WRITABLE_COLUMNS.has(key)) continue
+    payload[key] = value
+  }
+
+  const resolvedRoleId = await normalizeRoleId(body)
+  if (resolvedRoleId !== undefined) payload.role_id = resolvedRoleId
+
+  if (payload.password) {
+    payload.password = await bcrypt.hash(payload.password, 10)
+  }
+
+  return payload
+}
+
 /**
  * Crea un usuario y retorna el nuevo registro
  */
 export const createUser = async (body) => {
-  const keys = Object.keys(body)
-  const values = [...keys.map(k => body[k])]
+  const payload = await sanitizeUserPayload(body)
+  const keys = Object.keys(payload)
 
-  if (body.password) {
-    values[keys.indexOf('password')] = await bcrypt.hash(body.password, 10)
+  if (keys.length === 0) {
+    throw new Error('No hay campos válidos para crear el usuario')
   }
 
+  const values = keys.map(k => payload[k])
   const cols = keys.map(k => `"${k}"`).join(', ')
   const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ')
   const query = `INSERT INTO "User" (${cols}) VALUES (${placeholders}) RETURNING *`
@@ -132,6 +169,30 @@ export const getRoleById = async (roleId) => {
       throw e
     }
   }
+  return null
+}
+
+/**
+ * Busca un rol específico por su nombre
+ */
+export const getRoleByName = async (roleName) => {
+  if (!roleName) return null
+
+  const candidates = [
+    'public."Role"', 'public.roles', 'public."roles"', 'public.role',
+    '"Role"', 'roles', '"roles"', 'role', '"role"'
+  ]
+
+  for (const tbl of candidates) {
+    try {
+      const r = await pool.query(`SELECT id, name FROM ${tbl} WHERE LOWER(name) = LOWER($1) LIMIT 1`, [roleName])
+      if (r.rows && r.rows.length) return r.rows[0]
+    } catch (e) {
+      if (e && (e.code === '42P01' || e.code === '42703')) continue
+      throw e
+    }
+  }
+
   return null
 }
 

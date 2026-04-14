@@ -33,6 +33,9 @@ export const createUser = async (req, res) => {
     return res.status(201).json({ ok: true, user })
   } catch (error) {
     console.error(error)
+    if (error && error.message === 'No hay campos válidos para crear el usuario') {
+      return res.status(400).json({ ok: false, error: error.message })
+    }
     return res.status(500).json({ ok: false, error: 'Error al crear el usuario' })
   }
 }
