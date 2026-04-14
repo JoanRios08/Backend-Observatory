@@ -71,6 +71,14 @@ const normalizeStatus = (value, statusColumn) => {
   return value;
 };
 
+const isBlockedStatus = (status) => {
+  if (status === undefined || status === null || status === '') return false;
+  if (typeof status === 'boolean') return status === false;
+
+  const normalized = String(status).trim().toLowerCase();
+  return ['0', 'false', 'inactive', 'inactivo', 'disabled', 'deleted', 'eliminado'].includes(normalized);
+};
+
 const getRoleByName = async (roleName) => {
   if (!roleName || typeof roleName !== 'string') return null;
 
@@ -206,39 +214,32 @@ export const createUser = async (body) => {
 };
 
 export const authenticate = async (email, password) => {
-  const statusColumn = await getStatusColumn();
   const { roleSelect, roleJoin } = await getRoleJoinParts();
   const values = [email];
-  let statusFilter = '';
-
-  if (statusColumn && statusColumn.type && statusColumn.type.includes('boolean')) {
-    statusFilter = 'AND u."status" IS NOT FALSE';
-  } else if (statusColumn) {
-    values.push('active');
-    statusFilter = `AND COALESCE(u."status", 'active') = $${values.length}`;
-  }
 
   const result = await pool.query(`
     SELECT u.*${roleSelect}
     FROM ${USER_TABLE} u
     ${roleJoin}
     WHERE LOWER(u."email") = LOWER($1)
-      ${statusFilter}
     LIMIT 1
   `, values);
 
   if (result.rows.length === 0) return null;
 
   const user = result.rows[0];
+  if (isBlockedStatus(user.status)) return null;
+
   const hash = user.password || user.pass || user.password_hash;
   if (!hash) return null;
+  const storedPassword = typeof hash === 'string' ? hash.trim() : hash;
 
-  if (typeof hash === 'string' && hash.startsWith('$2')) {
-    const ok = await bcrypt.compare(password, hash);
+  if (typeof storedPassword === 'string' && storedPassword.startsWith('$2')) {
+    const ok = await bcrypt.compare(password, storedPassword);
     return ok ? user : null;
   }
 
-  if (password === hash) {
+  if (password === storedPassword) {
     try {
       const columns = await getUserColumns();
       const passwordColumn = findColumn(columns, ['password', 'password_hash', 'pass']);
