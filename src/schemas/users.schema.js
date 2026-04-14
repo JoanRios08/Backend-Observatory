@@ -6,7 +6,8 @@ import { z } from 'zod'
 // Se hace requerido para mantener datos consistentes en la BD.
 // Si tu flujo de negocio permite usuarios sin nombre, revierte este cambio.
 export const userCreateSchema = z.object({
-  name: z.string().min(1),        // requerido en creación
+  first_name: z.string().min(1),    
+      // requerido en creación
   email: z.string().email(),
   password: z.string().min(6),
   role: z.string().optional(),
