@@ -5,13 +5,15 @@ import bcrypt from 'bcryptjs'
  * Obtiene todos los usuarios activos con su respectivo nombre de rol
  */
 export const getAllUsers = async () => {
+  const statusType = await getUserStatusType()
+  const activeWhereClause = getActiveStatusWhereClause(statusType, 'u')
   const query = `
     SELECT 
       u.*, 
       r.name as role_name 
     FROM public."User" u
     LEFT JOIN public."Role" r ON u.role_id = r.id
-    WHERE u."status" IS NOT FALSE
+    ${activeWhereClause ? `WHERE ${activeWhereClause}` : ''}
     ORDER BY u.created_at DESC
   `
   const result = await pool.query(query)
@@ -119,11 +121,14 @@ export const createUser = async (body) => {
  * Autentica al usuario comparando el hash de la contraseña
  */
 export const authenticate = async (email, password) => {
+  const statusType = await getUserStatusType()
+  const activeWhereClause = getActiveStatusWhereClause(statusType, 'u')
   const query = `
     SELECT u.*, r.name as role_name 
     FROM public."User" u
     LEFT JOIN public."Role" r ON u.role_id = r.id
     WHERE u."email" = $1
+    ${activeWhereClause ? `AND ${activeWhereClause}` : ''}
   `
   const result = await pool.query(query, [email])
   if (result.rows.length === 0) return null
@@ -203,22 +208,16 @@ export const updateUser = async (id, body) => {
   const existing = await getUserById(id)
   if (!existing) return null
 
-  const keys = Object.keys(body).filter(k => k !== 'id' && body[k] !== undefined)
+  const payload = await sanitizeUserPayload(body)
+  const keys = Object.keys(payload).filter(k => k !== 'id' && payload[k] !== undefined)
   if (keys.length === 0) return existing
 
   const changed = []
   const values = []
 
   for (const k of keys) {
-    if (k === 'password') {
-      const hashed = await bcrypt.hash(body.password, 10)
-      changed.push(k)
-      values.push(hashed)
-      continue
-    }
-
     const oldVal = existing[k]
-    const newVal = body[k]
+    const newVal = payload[k]
     const oldStr = oldVal === null || oldVal === undefined ? '' : String(oldVal)
     const newStr = newVal === null || newVal === undefined ? '' : String(newVal)
     if (oldStr !== newStr) {
@@ -263,4 +262,23 @@ export const deleteUser = async (id) => {
     }
     throw error
   }
+}
+
+const getUserStatusType = async () => {
+  try {
+    const col = await pool.query(`
+      SELECT data_type FROM information_schema.columns 
+      WHERE table_schema='public' AND table_name='User' AND column_name='status'
+    `)
+    return (col.rows[0] && col.rows[0].data_type) || null
+  } catch (error) {
+    if (error && error.code === '42703') return null
+    throw error
+  }
+}
+
+const getActiveStatusWhereClause = (statusType, alias = 'u') => {
+  if (!statusType) return ''
+  if (statusType.includes('boolean')) return `${alias}."status" IS NOT FALSE`
+  return `COALESCE(${alias}."status", '') <> 'deleted'`
 }
