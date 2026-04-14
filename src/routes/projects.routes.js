@@ -7,14 +7,15 @@ import {
   deleteProject,
 } from '../controllers/projects.controllers.js'
 import { validate } from '../middlewares/validate.middleware.js'
+import { authenticate } from '../middlewares/auth.middleware.js'
 import { projectCreateSchema, projectUpdateSchema } from '../schemas/projects.schema.js'
 
 const router = Router()
 
-router.post('/projects', validate(projectCreateSchema), createProject)
+router.post('/projects', authenticate, validate(projectCreateSchema), createProject)
 router.get('/projects', getProjects)
 router.get('/projects/:id', getProjectById)
-router.put('/projects/:id', validate(projectUpdateSchema), updateProject)
-router.delete('/projects/:id', deleteProject)
+router.put('/projects/:id', authenticate, validate(projectUpdateSchema), updateProject)
+router.delete('/projects/:id', authenticate, deleteProject)
 
 export default router

@@ -43,13 +43,15 @@ export const createUser = async (req, res) => {
 export const login = async (req, res) => {
   const { email, password } = req.body || {}
   if (!email || !password) return res.status(400).json({ ok: false, error: 'Email y contraseña requeridos' })
+  const jwtSecret = process.env.JWT_SECRET
+  if (!jwtSecret) return res.status(500).json({ ok: false, error: 'JWT no configurado en el servidor' })
 
   try {
     const user = await usersModel.authenticate(email, password)
     if (!user) return res.status(401).json({ ok: false, error: 'Credenciales inválidas' })
 
     const payload = { id: user.id, email: user.email }
-    const token = jwt.sign(payload, process.env.JWT_SECRET || 'change_this_secret', { expiresIn: '1h' })
+    const token = jwt.sign(payload, jwtSecret, { expiresIn: '1h' })
 
     // Intenta obtener información del rol (id y nombre)
     let role = null
