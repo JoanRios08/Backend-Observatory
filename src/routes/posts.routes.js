@@ -1,4 +1,4 @@
-import { Router } from 'express'
+import { Router } from 'express';
 import {
   createPost,
   getPosts,
@@ -10,10 +10,14 @@ import {
 import { validate } from '../middlewares/validate.middleware.js'
 import { postCreateSchema, postStatusUpdateSchema, postUpdateSchema } from '../schemas/posts.schema.js'
 
-const router = Router()
+const router = Router();
 
-// Crear Post (Aquí ya forzamos el 'pending_approval' en la lógica interna)
-router.post('/posts', validate(postCreateSchema), createPost)
+router.post('/posts', validate(postCreateSchema), createPost);
+router.get('/posts', getPosts);
+router.get('/posts/:id', getPostById);
+router.put('/posts/:id', validate(postUpdateSchema), updatePost);
+router.patch('/posts/:id', validate(postUpdateSchema), updatePost);
+router.delete('/posts/:id', deletePost);
 
 // Obtener todos los posts
 router.get('/posts', getPosts)

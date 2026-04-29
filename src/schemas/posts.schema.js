@@ -1,4 +1,6 @@
-import { z } from 'zod'
+import { z } from 'zod';
+
+const optionalId = z.coerce.number().int().positive().optional().nullable();
 
 export const postStatusSchema = z.enum(['pending_approval', 'approved', 'rejected'])
 
