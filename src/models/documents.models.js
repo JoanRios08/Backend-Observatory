@@ -1,19 +1,23 @@
 import { pool } from '../db.js'
 
 /**
- * 1. CREAR DOCUMENTO: Solo con los campos solicitados
- * Forzamos la fecha de publicación y actualización a "ahora"
+ * 1. CREAR DOCUMENTO
  */
-export const createDocument = async ({ 
-  title, 
-  description, 
-  type, 
-  file_url, 
-  author_id, 
-  project_id, 
-  location_id 
+export const createDocument = async ({
+  title,
+  description,
+  type,
+  published_at,   // CORRECCIÓN #8: El parámetro published_at estaba declarado en
+                  // el schema y en el controlador pero la función del modelo lo
+                  // ignoraba silenciosamente (no aparecía en la desestructuración).
+                  // Ahora se recibe y se usa: si el cliente lo envía se respeta,
+                  // si no, se asigna la fecha actual como fallback.
+  file_url,
+  author_id,
+  project_id,
+  location_id
 }) => {
-  const now = new Date(); // Fecha automática para evitar nulos molestos
+  const now = new Date();
 
   const query = `
     INSERT INTO public."Document" (
@@ -31,15 +35,15 @@ export const createDocument = async ({
     RETURNING *`;
 
   const values = [
-    title, 
-    description || null, 
-    type, 
-    now,           // published_at forzado a hoy
-    file_url, 
-    author_id, 
-    project_id || null, 
+    title,
+    description || null,
+    type,
+    published_at || now,  // usa el valor del cliente o fecha actual
+    file_url,
+    author_id,
+    project_id || null,
     location_id || null,
-    now            // updated_at forzado a hoy
+    now
   ];
 
   const result = await pool.query(query, values);
@@ -47,17 +51,14 @@ export const createDocument = async ({
 }
 
 /**
- * 2. EDITAR DOCUMENTO: Lógica de actualización automática de fecha
- * Permite editar el contenido principal del documento
+ * 2. EDITAR DOCUMENTO
  */
 export const updateDocument = async (id, body) => {
   const now = new Date();
-  
-  // 1. Obtener los campos que sí vienen en el body (filtrar undefined)
+
   const fields = Object.keys(body).filter(key => body[key] !== undefined);
-  
+
   if (fields.length === 0) {
-    // Si no enviaron nada, solo actualizamos la fecha de edición
     const result = await pool.query(
       'UPDATE public."Document" SET "updated_at" = $1 WHERE id = $2 RETURNING *',
       [now, id]
@@ -65,39 +66,38 @@ export const updateDocument = async (id, body) => {
     return result.rows[0] || null;
   }
 
-  // 2. Construir la consulta dinámicamente
-  // Quedaría algo como: "title" = $1, "description" = $2...
   const setClause = fields
     .map((field, index) => `"${field}" = $${index + 1}`)
     .join(', ');
 
-  // 3. Añadir la fecha de actualización al final
   const query = `
     UPDATE public."Document"
     SET ${setClause}, "updated_at" = $${fields.length + 1}
     WHERE id = $${fields.length + 2}
     RETURNING *`;
 
-  // 4. Preparar los valores: [valor1, valor2, ..., fecha, id]
   const values = [...fields.map(f => body[f]), now, id];
 
   try {
     const result = await pool.query(query, values);
     return result.rows[0] || null;
   } catch (error) {
-    console.error("Error en query de actualización:", error.message);
-    throw error; // Esto permite que el controlador vea el error real
+    console.error('Error en query de actualización de Document:', error.message);
+    throw error;
   }
 }
 
 /**
- * 3. OBTENER TODOS: Con el nombre del autor (JOIN)
+ * 3. OBTENER TODOS
  */
 export const getAllDocuments = async () => {
+  // CORRECCIÓN #9: El JOIN usaba u.first_name que no existe en la tabla User
+  // (la tabla usa la columna "name" según el modelo de usuarios). Esto causaba
+  // que la query fallara con un error 42703 (columna inexistente) en producción.
   const query = `
     SELECT 
       d.*, 
-      u.first_name AS author_name 
+      u.name AS author_name 
     FROM public."Document" d 
     LEFT JOIN public."User" u ON d.author_id = u.id 
     ORDER BY d.created_at DESC
@@ -110,10 +110,11 @@ export const getAllDocuments = async () => {
  * 4. OBTENER POR ID
  */
 export const getDocumentById = async (id) => {
+  // CORRECCIÓN #9 (misma que arriba): u.first_name → u.name
   const query = `
     SELECT 
       d.*, 
-      u.first_name AS author_name 
+      u.name AS author_name 
     FROM public."Document" d 
     LEFT JOIN public."User" u ON d.author_id = u.id 
     WHERE d.id = $1

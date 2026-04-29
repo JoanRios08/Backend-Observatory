@@ -1,284 +1,316 @@
-import { pool } from '../db.js'
-import bcrypt from 'bcryptjs'
+import { pool } from '../db.js';
+import bcrypt from 'bcryptjs';
 
-/**
- * Obtiene todos los usuarios activos con su respectivo nombre de rol
- */
-export const getAllUsers = async () => {
-  const statusType = await getUserStatusType()
-  const activeWhereClause = getActiveStatusWhereClause(statusType, 'u')
-  const query = `
-    SELECT 
-      u.*, 
-      r.name as role_name 
-    FROM public."User" u
-    LEFT JOIN public."Role" r ON u.role_id = r.id
-    ${activeWhereClause ? `WHERE ${activeWhereClause}` : ''}
-    ORDER BY u.created_at DESC
-  `
-  const result = await pool.query(query)
-  return result.rows
-}
+const USER_TABLE = 'public."User"';
+const ROLE_TABLE = 'public."Role"';
+const USER_WRITE_FIELDS = new Set([
+  'name',
+  'first_name',
+  'last_name',
+  'dni',
+  'email',
+  'password',
+  'pass',
+  'password_hash',
+  'phone',
+  'role_id',
+  'last_login',
+  'profile_image_url',
+  'status',
+]);
 
-/**
- * Obtiene un usuario por ID incluyendo info de su rol
- */
-export const getUserById = async (id) => {
+let userColumnsCache = null;
+let roleTableExistsCache = null;
+
+const getUserColumns = async () => {
+  if (userColumnsCache) return userColumnsCache;
+
+  const result = await pool.query(`
+    SELECT column_name, data_type
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'User'
+  `);
+
+  userColumnsCache = new Map(result.rows.map(row => [row.column_name, row.data_type]));
+  return userColumnsCache;
+};
+
+const findColumn = (columns, candidates) => candidates.find(column => columns.has(column));
+
+const roleTableExists = async () => {
+  if (roleTableExistsCache !== null) return roleTableExistsCache;
+
+  const result = await pool.query('SELECT to_regclass($1) AS table_name', ['public."Role"']);
+  roleTableExistsCache = Boolean(result.rows[0] && result.rows[0].table_name);
+  return roleTableExistsCache;
+};
+
+const getRoleJoinParts = async () => {
+  const columns = await getUserColumns();
+  const canJoinRole = columns.has('role_id') && await roleTableExists();
+
+  return {
+    roleSelect: canJoinRole ? ', r.name AS role_name' : ', NULL AS role_name',
+    roleJoin: canJoinRole ? `LEFT JOIN ${ROLE_TABLE} r ON u.role_id = r.id` : '',
+  };
+};
+
+const getStatusColumn = async () => {
+  const columns = await getUserColumns();
+  const name = findColumn(columns, ['status']);
+  return name ? { name, type: columns.get(name) } : null;
+};
+
+const normalizeStatus = (value, statusColumn) => {
+  if (value === undefined || !statusColumn) return undefined;
+
+  const isBooleanColumn = statusColumn.type && statusColumn.type.includes('boolean');
+  if (isBooleanColumn) {
+    if (typeof value === 'boolean') return value;
+    return value === 'active';
+  }
+
+  if (typeof value === 'boolean') return value ? 'active' : 'inactive';
+  return value;
+};
+
+const isBlockedStatus = (status) => {
+  if (status === undefined || status === null || status === '') return false;
+  if (typeof status === 'boolean') return status === false;
+
+  const normalized = String(status).trim().toLowerCase();
+  return ['0', 'false', 'inactive', 'inactivo', 'disabled', 'deleted', 'eliminado'].includes(normalized);
+};
+
+const getRoleByName = async (roleName) => {
+  if (!roleName || typeof roleName !== 'string') return null;
+
   try {
-    const col = await pool.query(`
-      SELECT data_type FROM information_schema.columns 
-      WHERE table_schema='public' AND table_name='User' AND column_name='status'
-    `)
-    const statusType = (col.rows[0] && col.rows[0].data_type) || null
-
-    let queryBase = `
-      SELECT u.*, r.name as role_name 
-      FROM public."User" u
-      LEFT JOIN public."Role" r ON u.role_id = r.id
-      WHERE u.id = $1
-    `
-
-    if (statusType && statusType.includes('boolean')) {
-      const r = await pool.query(`${queryBase} AND u."status" IS NOT FALSE`, [id])
-      return r.rows[0] || null
-    } else if (statusType) {
-      const r = await pool.query(`${queryBase} AND COALESCE(u."status", '') <> $2`, [id, 'deleted'])
-      return r.rows[0] || null
-    } else {
-      const r = await pool.query(queryBase, [id])
-      return r.rows[0] || null
-    }
+    const result = await pool.query(
+      `SELECT id, name FROM ${ROLE_TABLE} WHERE LOWER(name) = LOWER($1) LIMIT 1`,
+      [roleName],
+    );
+    return result.rows[0] || null;
   } catch (error) {
-    if (error && error.code === '42703') {
-      const r = await pool.query(`
-        SELECT u.*, r.name as role_name 
-        FROM "User" u 
-        LEFT JOIN "Role" r ON u.role_id = r.id 
-        WHERE u.id = $1
-      `, [id])
-      return r.rows[0] || null
-    }
-    throw error
+    if (error && (error.code === '42P01' || error.code === '42703')) return null;
+    throw error;
   }
-}
+};
 
-const USER_WRITABLE_COLUMNS = new Set(['name', 'email', 'password', 'role_id', 'status'])
+const resolveRoleId = async (body) => {
+  if (body.role_id !== undefined) return body.role_id;
+  const roleValue = body.role !== undefined ? body.role : body.role_name;
+  if (roleValue === undefined) return undefined;
 
-const normalizeRoleId = async (body) => {
-  if (body.role_id !== undefined && body.role_id !== null && body.role_id !== '') {
-    return Number(body.role_id)
-  }
+  if (typeof roleValue === 'number') return roleValue;
+  if (typeof roleValue === 'string' && /^\d+$/.test(roleValue)) return Number(roleValue);
 
-  if (body.role === undefined || body.role === null || body.role === '') {
-    return undefined
-  }
+  const role = await getRoleByName(roleValue);
+  return role ? role.id : undefined;
+};
 
-  const asNumber = Number(body.role)
-  if (!Number.isNaN(asNumber)) return asNumber
-
-  const role = await getRoleByName(String(body.role))
-  return role ? role.id : undefined
-}
-
-const sanitizeUserPayload = async (body = {}) => {
-  const payload = {}
+const prepareUserWrite = async (body) => {
+  const columns = await getUserColumns();
+  const statusColumn = await getStatusColumn();
+  const passwordColumn = findColumn(columns, ['password', 'password_hash', 'pass']);
+  const prepared = {};
 
   for (const [key, value] of Object.entries(body)) {
-    if (!USER_WRITABLE_COLUMNS.has(key)) continue
-    payload[key] = value
+    if (value === undefined || key === 'role') continue;
+    if (!USER_WRITE_FIELDS.has(key)) continue;
+
+    if (key === 'password') {
+      if (passwordColumn) prepared[passwordColumn] = await bcrypt.hash(value, 10);
+      continue;
+    }
+
+    if (key === 'status') {
+      const normalizedStatus = normalizeStatus(value, statusColumn);
+      if (normalizedStatus !== undefined) prepared[statusColumn.name] = normalizedStatus;
+      continue;
+    }
+
+    if (columns.has(key)) {
+      prepared[key] = value;
+    }
   }
 
-  const resolvedRoleId = await normalizeRoleId(body)
-  if (resolvedRoleId !== undefined) payload.role_id = resolvedRoleId
-
-  if (payload.password) {
-    payload.password = await bcrypt.hash(payload.password, 10)
+  if (!prepared.name && !prepared.first_name) {
+    if (body.name !== undefined && columns.has('first_name')) prepared.first_name = body.name;
+    if (body.first_name !== undefined && columns.has('name')) prepared.name = body.first_name;
   }
 
-  return payload
-}
+  const roleId = await resolveRoleId(body);
+  if (roleId !== undefined && columns.has('role_id')) {
+    prepared.role_id = roleId;
+  }
 
-/**
- * Crea un usuario y retorna el nuevo registro
- */
+  return prepared;
+};
+
+const getActiveUserWhereClause = async (alias = 'u') => {
+  const statusColumn = await getStatusColumn();
+  if (!statusColumn) return { clause: '', params: [] };
+
+  const column = `${alias}."${statusColumn.name}"`;
+  if (statusColumn.type && statusColumn.type.includes('boolean')) {
+    return { clause: ` AND ${column} IS NOT FALSE`, params: [] };
+  }
+
+  return { clause: ` AND COALESCE(${column}, '') <> $2`, params: ['deleted'] };
+};
+
+export const getAllUsers = async () => {
+  const statusColumn = await getStatusColumn();
+  const { roleSelect, roleJoin } = await getRoleJoinParts();
+
+  let where = '';
+  const values = [];
+  if (statusColumn && statusColumn.type && statusColumn.type.includes('boolean')) {
+    where = 'WHERE u."status" IS NOT FALSE';
+  } else if (statusColumn) {
+    where = 'WHERE COALESCE(u."status", \'\') <> $1';
+    values.push('deleted');
+  }
+
+  const result = await pool.query(`
+    SELECT u.*${roleSelect}
+    FROM ${USER_TABLE} u
+    ${roleJoin}
+    ${where}
+    ORDER BY u.created_at DESC
+  `, values);
+  return result.rows;
+};
+
+export const getUserById = async (id) => {
+  const { clause, params } = await getActiveUserWhereClause('u');
+  const { roleSelect, roleJoin } = await getRoleJoinParts();
+  const values = [id, ...params];
+
+  const result = await pool.query(`
+    SELECT u.*${roleSelect}
+    FROM ${USER_TABLE} u
+    ${roleJoin}
+    WHERE u.id = $1${clause}
+  `, values);
+
+  return result.rows[0] || null;
+};
+
 export const createUser = async (body) => {
-  const payload = await sanitizeUserPayload(body)
-  const keys = Object.keys(payload)
+  const data = await prepareUserWrite(body);
+  const keys = Object.keys(data);
 
   if (keys.length === 0) {
-    throw new Error('No hay campos válidos para crear el usuario')
+    throw new Error('No hay campos validos para crear el usuario');
   }
 
-  const values = keys.map(k => payload[k])
-  const cols = keys.map(k => `"${k}"`).join(', ')
-  const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ')
-  const query = `INSERT INTO "User" (${cols}) VALUES (${placeholders}) RETURNING *`
-  const result = await pool.query(query, values)
-  return result.rows[0]
-}
+  const cols = keys.map(k => `"${k}"`).join(', ');
+  const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
+  const values = keys.map(key => data[key]);
 
-/**
- * Autentica al usuario comparando el hash de la contraseña
- */
+  const result = await pool.query(
+    `INSERT INTO ${USER_TABLE} (${cols}) VALUES (${placeholders}) RETURNING *`,
+    values,
+  );
+  return result.rows[0];
+};
+
 export const authenticate = async (email, password) => {
-  const statusType = await getUserStatusType()
-  const activeWhereClause = getActiveStatusWhereClause(statusType, 'u')
-  const query = `
-    SELECT u.*, r.name as role_name 
-    FROM public."User" u
-    LEFT JOIN public."Role" r ON u.role_id = r.id
-    WHERE u."email" = $1
-    ${activeWhereClause ? `AND ${activeWhereClause}` : ''}
-  `
-  const result = await pool.query(query, [email])
-  if (result.rows.length === 0) return null
+  const { roleSelect, roleJoin } = await getRoleJoinParts();
+  const values = [email];
 
-  const user = result.rows[0]
-  const hash = user.password || user.pass || user.password_hash
-  if (!hash) return null
+  const result = await pool.query(`
+    SELECT u.*${roleSelect}
+    FROM ${USER_TABLE} u
+    ${roleJoin}
+    WHERE LOWER(u."email") = LOWER($1)
+    LIMIT 1
+  `, values);
 
-  if (typeof hash === 'string' && hash.startsWith('$2')) {
-    const ok = await bcrypt.compare(password, hash)
-    return ok ? user : null
+  if (result.rows.length === 0) return null;
+
+  const user = result.rows[0];
+  if (isBlockedStatus(user.status)) return null;
+
+  const hash = user.password || user.pass || user.password_hash;
+  if (!hash) return null;
+  const storedPassword = typeof hash === 'string' ? hash.trim() : hash;
+
+  if (typeof storedPassword === 'string' && storedPassword.startsWith('$2')) {
+    const ok = await bcrypt.compare(password, storedPassword);
+    return ok ? user : null;
   }
 
-  if (password === hash) {
+  if (password === storedPassword) {
     try {
-      const newHash = await bcrypt.hash(password, 10)
-      await pool.query('UPDATE public."User" SET "password" = $1 WHERE id = $2', [newHash, user.id])
-    } catch (e) {
-      console.error('Failed to migrate password to bcrypt for user', user.id, e)
+      const columns = await getUserColumns();
+      const passwordColumn = findColumn(columns, ['password', 'password_hash', 'pass']);
+      if (passwordColumn) {
+        const newHash = await bcrypt.hash(password, 10);
+        await pool.query(`UPDATE ${USER_TABLE} SET "${passwordColumn}" = $1 WHERE id = $2`, [newHash, user.id]);
+      }
+    } catch (error) {
+      console.error('Failed to migrate password to bcrypt for user', user.id, error);
     }
-    return user
+    return user;
   }
 
-  return null
-}
+  return null;
+};
 
-/**
- * Busca un rol específico por su ID
- */
 export const getRoleById = async (roleId) => {
-  if (!roleId) return null
-  const candidates = [
-    'public."Role"', 'public.roles', 'public."roles"', 'public.role',
-    '"Role"', 'roles', '"roles"', 'role', '"role"'
-  ]
+  if (!roleId) return null;
 
-  for (const tbl of candidates) {
-    try {
-      const r = await pool.query(`SELECT id, name FROM ${tbl} WHERE id = $1 LIMIT 1`, [roleId])
-      if (r.rows && r.rows.length) return r.rows[0]
-    } catch (e) {
-      if (e && (e.code === '42P01' || e.code === '42703')) continue
-      throw e
-    }
+  try {
+    const result = await pool.query(`SELECT id, name FROM ${ROLE_TABLE} WHERE id = $1 LIMIT 1`, [roleId]);
+    return result.rows[0] || null;
+  } catch (error) {
+    if (error && (error.code === '42P01' || error.code === '42703')) return null;
+    throw error;
   }
-  return null
-}
+};
 
-/**
- * Busca un rol específico por su nombre
- */
-export const getRoleByName = async (roleName) => {
-  if (!roleName) return null
-
-  const candidates = [
-    'public."Role"', 'public.roles', 'public."roles"', 'public.role',
-    '"Role"', 'roles', '"roles"', 'role', '"role"'
-  ]
-
-  for (const tbl of candidates) {
-    try {
-      const r = await pool.query(`SELECT id, name FROM ${tbl} WHERE LOWER(name) = LOWER($1) LIMIT 1`, [roleName])
-      if (r.rows && r.rows.length) return r.rows[0]
-    } catch (e) {
-      if (e && (e.code === '42P01' || e.code === '42703')) continue
-      throw e
-    }
-  }
-
-  return null
-}
-
-/**
- * Actualiza los datos de un usuario
- */
 export const updateUser = async (id, body) => {
-  const existing = await getUserById(id)
-  if (!existing) return null
+  const existing = await getUserById(id);
+  if (!existing) return null;
 
-  const payload = await sanitizeUserPayload(body)
-  const keys = Object.keys(payload).filter(k => k !== 'id' && payload[k] !== undefined)
-  if (keys.length === 0) return existing
+  const data = await prepareUserWrite(body);
+  const keys = Object.keys(data).filter(key => key !== 'id');
+  if (keys.length === 0) return existing;
 
-  const changed = []
-  const values = []
+  const setClause = keys.map((key, index) => `"${key}" = $${index + 1}`).join(', ');
+  const values = keys.map(key => data[key]);
+  values.push(id);
 
-  for (const k of keys) {
-    const oldVal = existing[k]
-    const newVal = payload[k]
-    const oldStr = oldVal === null || oldVal === undefined ? '' : String(oldVal)
-    const newStr = newVal === null || newVal === undefined ? '' : String(newVal)
-    if (oldStr !== newStr) {
-      changed.push(k)
-      values.push(newVal)
-    }
-  }
+  const result = await pool.query(
+    `UPDATE ${USER_TABLE} SET ${setClause}, "updated_at" = NOW() WHERE id = $${values.length} RETURNING *`,
+    values,
+  );
+  return result.rows[0] || null;
+};
 
-  if (changed.length === 0) return existing
-
-  const setClause = changed.map((k, i) => `"${k}" = $${i + 1}`).join(', ')
-  const query = `UPDATE "User" SET ${setClause}, "updated_at" = NOW() WHERE id = $${values.length + 1} RETURNING *`
-  values.push(id)
-  const result = await pool.query(query, values)
-  return result.rows[0] || null
-}
-
-/**
- * Realiza un borrado lógico (status = false) o físico si la columna no existe
- */
 export const deleteUser = async (id) => {
-  try {
-    const col = await pool.query(`
-      SELECT data_type FROM information_schema.columns 
-      WHERE table_schema='public' AND table_name='User' AND column_name='status'
-    `)
-    const statusType = (col.rows[0] && col.rows[0].data_type) || null
-    
-    let result
-    if (statusType && statusType.includes('boolean')) {
-      result = await pool.query('UPDATE public."User" SET "status" = $1 WHERE "id" = $2 RETURNING *', [false, id])
-    } else if (statusType) {
-      result = await pool.query('UPDATE public."User" SET "status" = $1 WHERE "id" = $2 RETURNING *', ['deleted', id])
-    } else {
-      result = await pool.query('DELETE FROM public."User" WHERE "id" = $1 RETURNING *', [id])
-    }
-    return result.rows[0] || null
-  } catch (error) {
-    if (error && error.code === '42703') {
-      const result = await pool.query('DELETE FROM "User" WHERE id = $1 RETURNING *', [id])
-      return result.rows[0] || null
-    }
-    throw error
-  }
-}
+  const statusColumn = await getStatusColumn();
 
-const getUserStatusType = async () => {
-  try {
-    const col = await pool.query(`
-      SELECT data_type FROM information_schema.columns 
-      WHERE table_schema='public' AND table_name='User' AND column_name='status'
-    `)
-    return (col.rows[0] && col.rows[0].data_type) || null
-  } catch (error) {
-    if (error && error.code === '42703') return null
-    throw error
+  if (statusColumn && statusColumn.type && statusColumn.type.includes('boolean')) {
+    const result = await pool.query(
+      `UPDATE ${USER_TABLE} SET "${statusColumn.name}" = $1 WHERE id = $2 RETURNING *`,
+      [false, id],
+    );
+    return result.rows[0] || null;
   }
-}
 
-const getActiveStatusWhereClause = (statusType, alias = 'u') => {
-  if (!statusType) return ''
-  if (statusType.includes('boolean')) return `${alias}."status" IS NOT FALSE`
-  return `COALESCE(${alias}."status", '') <> 'deleted'`
-}
+  if (statusColumn) {
+    const result = await pool.query(
+      `UPDATE ${USER_TABLE} SET "${statusColumn.name}" = $1 WHERE id = $2 RETURNING *`,
+      ['deleted', id],
+    );
+    return result.rows[0] || null;
+  }
+
+  const result = await pool.query(`DELETE FROM ${USER_TABLE} WHERE id = $1 RETURNING *`, [id]);
+  return result.rows[0] || null;
+};
