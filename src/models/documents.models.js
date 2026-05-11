@@ -1,6 +1,8 @@
 import { pool } from '../db.js';
 
+// Usamos comillas dobles para respetar la mayúscula en PostgreSQL
 const DOCUMENT_TABLE = 'public."Document"';
+
 const DOCUMENT_WRITE_FIELDS = new Set([
   'title',
   'description',
@@ -14,18 +16,31 @@ const DOCUMENT_WRITE_FIELDS = new Set([
 
 let documentColumnsCache = null;
 
+/**
+ * Obtiene las columnas reales de la tabla para evitar errores de inserción
+ * y manejar dinámicamente los JOINS.
+ */
 const getDocumentColumns = async () => {
   if (documentColumnsCache) return documentColumnsCache;
 
-  const result = await pool.query(`
-    SELECT column_name
-    FROM information_schema.columns
-    WHERE table_schema = 'public'
-      AND table_name = 'Document'
-  `);
+  try {
+    const result = await pool.query(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'Document'
+    `);
 
-  documentColumnsCache = new Set(result.rows.map(row => row.column_name));
-  return documentColumnsCache;
+    if (result.rows.length === 0) {
+      console.error("⚠️ ADVERTENCIA: No se encontraron columnas. Verifica que la tabla 'Document' exista en el esquema 'public'.");
+    }
+
+    documentColumnsCache = new Set(result.rows.map(row => row.column_name));
+    return documentColumnsCache;
+  } catch (error) {
+    console.error("Error al obtener metadatos de la tabla:", error.message);
+    return new Set();
+  }
 };
 
 const prepareDocumentWrite = async (body, { isCreate = false } = {}) => {
@@ -52,18 +67,26 @@ const getDocumentOrderBy = async () => {
   return 'ORDER BY d."id" DESC';
 };
 
+/**
+ * Genera el query de selección dinámico manejando posibles fallos en JOINS
+ */
 const getDocumentSelect = async ({ byId = false } = {}) => {
   const columns = await getDocumentColumns();
   const orderBy = byId ? '' : await getDocumentOrderBy();
-  const authorSelect = columns.has('author_id')
-    ? ', COALESCE(a.name, u.name) AS author_name'
+  
+  // Verificamos si existen las columnas para los JOINS
+  const hasAuthorId = columns.has('author_id');
+  
+  const authorSelect = hasAuthorId 
+    ? ', a.name AS author_name' 
     : '';
-  const authorJoins = columns.has('author_id')
-    ? `
-      LEFT JOIN public."Author" a ON d.author_id = a.id
-      LEFT JOIN public."User" u ON d.author_id = u.id
-    `
+
+  // Nota: Si las tablas Author o User no existen con mayúsculas, esto fallará.
+  // Si da error, cambia public."Author" por public.author (minúsculas)
+  const authorJoins = hasAuthorId
+    ? `LEFT JOIN public."Author" a ON d.author_id = a.id`
     : '';
+
   const where = byId ? 'WHERE d.id = $1' : '';
 
   return `
@@ -80,7 +103,7 @@ export const createDocument = async (body) => {
   const keys = Object.keys(data);
 
   if (keys.length === 0) {
-    throw new Error('No hay campos validos para crear el documento');
+    throw new Error('No hay campos válidos para crear el documento');
   }
 
   const columns = await getDocumentColumns();
@@ -131,15 +154,25 @@ export const updateDocument = async (id, body) => {
 };
 
 export const getAllDocuments = async () => {
-  const query = await getDocumentSelect();
-  const result = await pool.query(query);
-  return result.rows;
+  try {
+    const query = await getDocumentSelect();
+    const result = await pool.query(query);
+    return result.rows;
+  } catch (error) {
+    console.error("❌ ERROR EN QUERY ALL_DOCUMENTS:", error.message);
+    throw error; // Re-lanzamos para que el controlador lo capture
+  }
 };
 
 export const getDocumentById = async (id) => {
-  const query = await getDocumentSelect({ byId: true });
-  const result = await pool.query(query, [id]);
-  return result.rows[0] || null;
+  try {
+    const query = await getDocumentSelect({ byId: true });
+    const result = await pool.query(query, [id]);
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error(`❌ ERROR EN GET_DOCUMENT_BY_ID (${id}):`, error.message);
+    throw error;
+  }
 };
 
 export const deleteDocument = async (id) => {
