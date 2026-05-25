@@ -12,6 +12,15 @@ const POST_WRITE_FIELDS = new Set([
 
 let postColumnsCache = null;
 
+const POST_STATUS_TO_STORAGE = {
+  approved: 'published',
+};
+
+const normalizePostWriteValue = (key, value) => {
+  if (key !== 'status' || value === null) return value;
+  return POST_STATUS_TO_STORAGE[value] || value;
+};
+
 const getPostColumns = async () => {
   if (postColumnsCache) return postColumnsCache;
 
@@ -34,7 +43,7 @@ const preparePostWrite = async (body, { isCreate = false } = {}) => {
     if (value === undefined) continue;
     if (!POST_WRITE_FIELDS.has(key)) continue;
     if (!columns.has(key)) continue;
-    data[key] = value;
+    data[key] = normalizePostWriteValue(key, value);
   }
 
   if (isCreate && columns.has('status') && data.status === undefined) {

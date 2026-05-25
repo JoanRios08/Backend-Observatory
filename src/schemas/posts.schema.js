@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 const optionalId = z.coerce.number().int().positive().optional().nullable();
 
-export const postStatusSchema = z.enum(['pending_approval', 'approved', 'rejected'])
+export const postStatusSchema = z.enum(['pending_approval', 'approved', 'published', 'draft', 'rejected'])
 
 export const postCreateSchema = z.object({
   title: z.string().min(1),

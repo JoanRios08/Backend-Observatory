@@ -1,5 +1,9 @@
 import * as postsModel from '../models/posts.models.js';
 
+const POST_STATUS_CONSTRAINT_CODE = '23514';
+
+const isPostStatusConstraintError = (error) => error && error.code === POST_STATUS_CONSTRAINT_CODE;
+
 export const createPost = async (req, res) => {
   const body = req.body || {};
 
@@ -21,31 +25,40 @@ export const createPost = async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Faltan campos requeridos para crear el post' });
     }
 
+    if (isPostStatusConstraintError(error)) {
+      return res.status(400).json({ ok: false, error: 'Estatus del post no permitido por la base de datos' });
+    }
+
     return res.status(500).json({ ok: false, error: 'Error al crear el post' });
   }
 };
 
 export const updatePostStatus = async (req, res) => {
-  const { id } = req.params
-  const { status } = req.body
+  const { id } = req.params;
+  const { status } = req.body;
 
   try {
-    const post = await postsModel.updatePost(id, { status })
+    const post = await postsModel.updatePost(id, { status });
 
     if (!post) {
-      return res.status(404).json({ ok: false, error: 'Post no encontrado' })
+      return res.status(404).json({ ok: false, error: 'Post no encontrado' });
     }
 
     return res.status(200).json({
       ok: true,
-      message: 'Estatus del post actualizado con éxito',
+      message: 'Estatus del post actualizado con exito',
       post,
-    })
+    });
   } catch (error) {
-    console.error('Error en updatePostStatus:', error)
-    return res.status(500).json({ ok: false, error: 'Error al actualizar el estatus del post' })
+    console.error('Error en updatePostStatus:', error);
+
+    if (isPostStatusConstraintError(error)) {
+      return res.status(400).json({ ok: false, error: 'Estatus del post no permitido por la base de datos' });
+    }
+
+    return res.status(500).json({ ok: false, error: 'Error al actualizar el estatus del post' });
   }
-}
+};
 
 export const getPosts = async (req, res) => {
   try {
@@ -93,6 +106,10 @@ export const updatePost = async (req, res) => {
       return res.status(400).json({ ok: false, error: 'No se puede dejar vacio un campo requerido' });
     }
 
+    if (isPostStatusConstraintError(error)) {
+      return res.status(400).json({ ok: false, error: 'Estatus del post no permitido por la base de datos' });
+    }
+
     return res.status(500).json({ ok: false, error: 'Error al actualizar el post' });
   }
 };
@@ -108,4 +125,4 @@ export const deletePost = async (req, res) => {
     console.error('Error en deletePost:', error);
     return res.status(500).json({ ok: false, error: 'Error al eliminar el post' });
   }
-}
+};
