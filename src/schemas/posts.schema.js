@@ -11,6 +11,9 @@ export const postCreateSchema = z.object({
   user_id: z.number(),
   category_id: z.number(),
   author_id: z.number(),
+  career_id: optionalId,
+  campus_id: optionalId,
+  campus_career_id: optionalId,
 })
 
 export const postUpdateSchema = postCreateSchema.partial()

@@ -13,6 +13,9 @@ export const documentCreateSchema = z.object({
   author_id: z.coerce.number().int().positive(),
   project_id: optionalId,
   location_id: optionalId,
+  career_id: optionalId,
+  campus_id: optionalId,
+  campus_career_id: optionalId,
 }).strict()
 
 export const documentUpdateSchema = documentCreateSchema.partial()

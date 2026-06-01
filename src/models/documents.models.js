@@ -1,7 +1,8 @@
 import { pool } from '../db.js';
+import { addAcademicWriteFields, getAcademicRelationsSelect } from './academic-relations.models.js';
 
 const DOCUMENT_TABLE = 'public."Document"';
-const DOCUMENT_WRITE_FIELDS = new Set([
+const DOCUMENT_WRITE_FIELDS = addAcademicWriteFields(new Set([
   'title',
   'description',
   'type',
@@ -10,7 +11,7 @@ const DOCUMENT_WRITE_FIELDS = new Set([
   'author_id',
   'project_id',
   'location_id',
-]);
+]));
 
 let documentColumnsCache = null;
 
@@ -65,11 +66,13 @@ const getDocumentSelect = async ({ byId = false } = {}) => {
     `
     : '';
   const where = byId ? 'WHERE d.id = $1' : '';
+  const academicRelations = await getAcademicRelationsSelect('d', columns);
 
   return `
-    SELECT d.*${authorSelect}
+    SELECT d.*${authorSelect}${academicRelations.select}
     FROM ${DOCUMENT_TABLE} d
     ${authorJoins}
+    ${academicRelations.joins}
     ${where}
     ${orderBy}
   `;

@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+const optionalId = z.coerce.number().int().positive().optional().nullable()
+
 // CORRECCIÓN #19: El .passthrough() en ambos schemas permitía que cualquier
 // campo extra del body (ej: author_name, id, created_at) pasara la validación
 // y llegara al modelo, donde podría inyectarse en queries dinámicas.
@@ -14,6 +16,9 @@ export const projectCreateSchema = z.object({
   end_date: z.string().optional(),
   status: z.enum(['active', 'completed', 'suspended']).optional(),
   author_id: z.number(),
+  career_id: optionalId,
+  campus_id: optionalId,
+  campus_career_id: optionalId,
 })
 
 export const projectUpdateSchema = projectCreateSchema.partial()
