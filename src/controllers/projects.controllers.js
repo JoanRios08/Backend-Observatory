@@ -2,16 +2,10 @@ import * as projectsModel from '../models/projects.models.js'
 
 export const createProject = async (req, res) => {
   try {
-    const { name, description, start_date, end_date, status, author_id } = req.body;
-
+    const body = req.body || {};
     const newProject = await projectsModel.createProject({
-      name,
-      description,
-      start_date,
-      end_date,
-      // Si status viene en el body lo usa, si no, pone 'active'
-      status: status || 'active', 
-      author_id
+      ...body,
+      status: body.status || 'active',
     });
 
     return res.status(201).json({

@@ -1,14 +1,15 @@
 import { pool } from '../db.js';
+import { addAcademicWriteFields, getAcademicRelationsSelect } from './academic-relations.models.js';
 
 const POST_TABLE = 'public."Post"';
-const POST_WRITE_FIELDS = new Set([
+const POST_WRITE_FIELDS = addAcademicWriteFields(new Set([
   'title',
   'content',
   'status',
   'user_id',
   'category_id',
   'author_id',
-]);
+]));
 
 let postColumnsCache = null;
 
@@ -55,8 +56,23 @@ const preparePostWrite = async (body, { isCreate = false } = {}) => {
 
 const getPostOrderBy = async () => {
   const columns = await getPostColumns();
-  if (columns.has('created_at')) return 'ORDER BY "created_at" DESC';
-  return 'ORDER BY "id" DESC';
+  if (columns.has('created_at')) return 'ORDER BY p."created_at" DESC';
+  return 'ORDER BY p."id" DESC';
+};
+
+const getPostSelect = async ({ byId = false } = {}) => {
+  const columns = await getPostColumns();
+  const orderBy = byId ? '' : await getPostOrderBy();
+  const academicRelations = await getAcademicRelationsSelect('p', columns);
+  const where = byId ? 'WHERE p.id = $1' : '';
+
+  return `
+    SELECT p.*${academicRelations.select}
+    FROM ${POST_TABLE} p
+    ${academicRelations.joins}
+    ${where}
+    ${orderBy}
+  `;
 };
 
 export const createPost = async (body) => {
@@ -108,13 +124,14 @@ export const updatePost = async (id, body) => {
 };
 
 export const getAllPosts = async () => {
-  const orderBy = await getPostOrderBy();
-  const result = await pool.query(`SELECT * FROM ${POST_TABLE} ${orderBy}`);
+  const query = await getPostSelect();
+  const result = await pool.query(query);
   return result.rows;
 };
 
 export const getPostById = async (id) => {
-  const result = await pool.query(`SELECT * FROM ${POST_TABLE} WHERE id = $1`, [id]);
+  const query = await getPostSelect({ byId: true });
+  const result = await pool.query(query, [id]);
   return result.rows[0] || null;
 };
 

@@ -2,13 +2,13 @@ import * as documentsModel from '../models/documents.models.js'
 
 export const createDocument = async (req, res) => {
   const body = req.body || {}
-  const { title, description, type, published_at, file_url, author_id, project_id, location_id } = body
+  const { title, type, file_url, author_id } = body
   if (!title || !type || !file_url || !author_id) {
     return res.status(400).json({ ok: false, error: 'Faltan campos requeridos' })
   }
 
   try {
-    const document = await documentsModel.createDocument({ title, description, type, published_at, file_url, author_id, project_id, location_id })
+    const document = await documentsModel.createDocument(body)
     return res.status(201).json({ ok: true, document })
   } catch (error) {
     console.error(error)

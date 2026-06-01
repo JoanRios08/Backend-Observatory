@@ -1,101 +1,142 @@
 import { pool } from '../db.js'
+import { addAcademicWriteFields, getAcademicRelationsSelect } from './academic-relations.models.js'
 
-/**
- * 1. CREAR PROYECTO
- */
-export const createProject = async ({ name, description, start_date, end_date, status, author_id }) => {
-  const now = new Date();
+const PROJECT_TABLE = 'public."Project"'
+const PROJECT_WRITE_FIELDS = addAcademicWriteFields(new Set([
+  'name',
+  'description',
+  'start_date',
+  'end_date',
+  'status',
+  'author_id',
+]))
 
-  const query = `
-    INSERT INTO public."Project" (
-      "name", 
-      "description", 
-      "start_date", 
-      "end_date", 
-      "status", 
-      "author_id", 
-      "updated_at"
-    ) 
-    VALUES ($1, $2, $3, $4, $5, $6, $7) 
-    RETURNING *`;
+let projectColumnsCache = null
 
-  const values = [
-    name,
-    description || null,
-    start_date || null,
-    end_date || null,
-    status,
-    author_id,
-    now
-  ];
+const getProjectColumns = async () => {
+  if (projectColumnsCache) return projectColumnsCache
 
-  const result = await pool.query(query, values);
-  return result.rows[0];
+  const result = await pool.query(`
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'Project'
+  `)
+
+  projectColumnsCache = new Set(result.rows.map(row => row.column_name))
+  return projectColumnsCache
 }
 
-/**
- * 2. OBTENER TODOS
- */
+const prepareProjectWrite = async (body, { isCreate = false } = {}) => {
+  const columns = await getProjectColumns()
+  const data = {}
+
+  for (const [key, value] of Object.entries(body || {})) {
+    if (value === undefined) continue
+    if (!PROJECT_WRITE_FIELDS.has(key)) continue
+    if (!columns.has(key)) continue
+    data[key] = value
+  }
+
+  if (isCreate && columns.has('status') && data.status === undefined) {
+    data.status = 'active'
+  }
+
+  return data
+}
+
+const getProjectOrderBy = async () => {
+  const columns = await getProjectColumns()
+  if (columns.has('created_at')) return 'ORDER BY p."created_at" DESC'
+  return 'ORDER BY p."id" DESC'
+}
+
+const getProjectSelect = async ({ byId = false } = {}) => {
+  const columns = await getProjectColumns()
+  const orderBy = byId ? '' : await getProjectOrderBy()
+  const authorSelect = columns.has('author_id') ? ', a.name AS author_name' : ''
+  const authorJoin = columns.has('author_id')
+    ? 'LEFT JOIN public."Author" a ON p.author_id = a.id'
+    : ''
+  const academicRelations = await getAcademicRelationsSelect('p', columns)
+  const where = byId ? 'WHERE p.id = $1' : ''
+
+  return `
+    SELECT p.*${authorSelect}${academicRelations.select}
+    FROM ${PROJECT_TABLE} p
+    ${authorJoin}
+    ${academicRelations.joins}
+    ${where}
+    ${orderBy}
+  `
+}
+
+export const createProject = async (body) => {
+  const data = await prepareProjectWrite(body, { isCreate: true })
+  const keys = Object.keys(data)
+
+  if (keys.length === 0) {
+    throw new Error('No hay campos validos para crear el proyecto')
+  }
+
+  const columns = await getProjectColumns()
+  if (columns.has('updated_at') && data.updated_at === undefined) {
+    data.updated_at = new Date()
+    keys.push('updated_at')
+  }
+
+  const cols = keys.map(key => `"${key}"`).join(', ')
+  const placeholders = keys.map((_, index) => `$${index + 1}`).join(', ')
+  const values = keys.map(key => data[key])
+
+  const result = await pool.query(
+    `INSERT INTO ${PROJECT_TABLE} (${cols}) VALUES (${placeholders}) RETURNING *`,
+    values,
+  )
+
+  return result.rows[0]
+}
+
 export const getAllProjects = async () => {
-  const query = `
-    SELECT p.*, a.name AS author_name 
-    FROM public."Project" p 
-    LEFT JOIN public."Author" a ON p.author_id = a.id 
-    ORDER BY p.created_at DESC
-  `;
-  const result = await pool.query(query);
-  return result.rows;
+  const query = await getProjectSelect()
+  const result = await pool.query(query)
+  return result.rows
 }
 
-/**
- * 3. OBTENER POR ID
- */
 export const getProjectById = async (id) => {
-  const query = `
-    SELECT p.*, a.name AS author_name 
-    FROM public."Project" p 
-    LEFT JOIN public."Author" a ON p.author_id = a.id 
-    WHERE p.id = $1
-  `;
-  const result = await pool.query(query, [id]);
-  return result.rows[0] || null;
+  const query = await getProjectSelect({ byId: true })
+  const result = await pool.query(query, [id])
+  return result.rows[0] || null
 }
 
-/**
- * 4. ACTUALIZAR PROYECTO
- */
 export const updateProject = async (id, body) => {
-  // CORRECCIÓN #14: Al igual que en authors, se agrega verificación de
-  // existencia previa y whitelist de campos para evitar que el cliente
-  // actualice columnas arbitrarias (ej: id, created_at).
   const existing = await getProjectById(id)
   if (!existing) return null
 
-  const ALLOWED_FIELDS = ['name', 'description', 'start_date', 'end_date', 'status', 'author_id']
-  const keys = Object.keys(body).filter(k =>
-    ALLOWED_FIELDS.includes(k) && body[k] !== undefined
-  )
+  const data = await prepareProjectWrite(body)
+  const keys = Object.keys(data).filter(key => key !== 'id')
 
   if (keys.length === 0) return existing
 
-  const now = new Date();
-  const setClause = keys.map((k, i) => `"${k}" = $${i + 1}`).join(', ');
-  const query = `
-    UPDATE public."Project" 
-    SET ${setClause}, "updated_at" = $${keys.length + 1} 
-    WHERE id = $${keys.length + 2} 
-    RETURNING *`;
+  const columns = await getProjectColumns()
+  if (columns.has('updated_at')) {
+    data.updated_at = new Date()
+    keys.push('updated_at')
+  }
 
-  const values = [...keys.map(k => body[k]), now, id];
+  const setClause = keys.map((key, index) => `"${key}" = $${index + 1}`).join(', ')
+  const values = keys.map(key => data[key])
+  values.push(id)
 
-  const result = await pool.query(query, values);
-  return result.rows[0] || null;
+  const result = await pool.query(
+    `UPDATE ${PROJECT_TABLE} SET ${setClause} WHERE id = $${values.length} RETURNING *`,
+    values,
+  )
+
+  return result.rows[0] || null
 }
 
-/**
- * 5. ELIMINAR PROYECTO
- */
 export const deleteProject = async (id) => {
-  const result = await pool.query('DELETE FROM public."Project" WHERE id = $1 RETURNING *', [id]);
-  return result.rows[0] || null;
+  const result = await pool.query(`DELETE FROM ${PROJECT_TABLE} WHERE id = $1 RETURNING *`, [id])
+  return result.rows[0] || null
 }
