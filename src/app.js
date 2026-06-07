@@ -18,9 +18,24 @@ const whiteList = [
   'http://localhost:5173'
 ];
 
+const allowedNetlifyHosts = [
+  'serene-douhua-3515f7.netlify.app',
+];
+
+const isAllowedNetlifyPreview = (origin) => {
+  try {
+    const url = new URL(origin);
+    return allowedNetlifyHosts.some(host => (
+      url.hostname === host || url.hostname.endsWith(`--${host}`)
+    ));
+  } catch (error) {
+    return false;
+  }
+};
+
 const corsOptions = {
   origin: function (origin, callback) {
-    if (!origin || whiteList.indexOf(origin) !== -1) {
+    if (!origin || whiteList.indexOf(origin) !== -1 || isAllowedNetlifyPreview(origin)) {
       callback(null, true);
     } else {
       callback(new Error('No permitido por CORS'));
