@@ -7,6 +7,7 @@ import documentsRoutes from './routes/documents.routes.js';
 import projectsRoutes from './routes/projects.routes.js';
 import authorsRoutes from './routes/authors.routes.js';
 import dashboardRoutes from './routes/dashboard.routes.js';
+import academicRoutes from './routes/academic.routes.js';
 
 const app = express();
 
@@ -48,6 +49,7 @@ app.use(documentsRoutes);
 app.use(projectsRoutes);
 app.use(authorsRoutes);
 app.use(dashboardRoutes);
+app.use(academicRoutes);
 
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
